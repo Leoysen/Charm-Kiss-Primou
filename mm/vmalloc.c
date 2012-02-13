@@ -2183,7 +2183,7 @@ static int f(pte_t *pte, pgtable_t table, unsigned long addr, void *data)
  *	If @ptes is non-NULL, pointers to the PTEs (in init_mm)
  *	allocated for the VM area are returned.
  */
-struct vm_struct *alloc_vm_area(size_t size, pte_t **ptes)
+struct vm_struct *alloc_vm_area(size_t size)
 {
 	struct vm_struct *area;
 
@@ -2197,7 +2197,7 @@ struct vm_struct *alloc_vm_area(size_t size, pte_t **ptes)
 	 * of kernel virtual address space and mapped into init_mm.
 	 */
 	if (apply_to_page_range(&init_mm, (unsigned long)area->addr,
-				size, f, ptes ? &ptes : NULL)) {
+				size, f, NULL)) {
 		free_vm_area(area);
 		return NULL;
 	}
