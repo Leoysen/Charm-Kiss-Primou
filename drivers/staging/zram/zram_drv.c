@@ -32,6 +32,10 @@
 #include <linux/crypto.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+#include <linux/swap.h>
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
+
 
 #include "zram_drv.h"
 #if defined(CONFIG_ZRAM_LZ4)
@@ -196,6 +200,22 @@ static void zram_set_disksize(struct zram *zram, size_t totalram_bytes)
 
 	zram->disksize &= PAGE_MASK;
 }
+
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+/*
+ * Swap header (1st page of swap device) contains information
+ * about a swap file/partition. Prepare such a header for the
+ * given ramzswap device so that swapon can identify it as a
+ * swap partition.
+ */
+static void setup_swap_header(struct zram *zram, union swap_header *s)
+{
+	s->info.version = 1;
+	s->info.last_page = (zram->disksize >> PAGE_SHIFT) - 1;
+	s->info.nr_badpages = 0;
+	memcpy(s->magic.magic, "SWAPSPACE2", 10);
+}
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 static void zram_free_page(struct zram *zram, size_t index)
 {
@@ -618,7 +638,10 @@ int zram_init_device(struct zram *zram)
 {
 	int ret;
 	size_t num_pages;
-
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+	struct page *page;
+	union swap_header *swap_header;
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 	down_write(&zram->init_lock);
 
 	if (zram->init_done) {
@@ -643,7 +666,18 @@ int zram_init_device(struct zram *zram)
 		ret = -ENOMEM;
 		goto fail_no_table;
 	}
-
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+	page = alloc_page(__GFP_ZERO);
+	if (!page) {
+		pr_err("Error allocating swap header page\n");
+		ret = -ENOMEM;
+		goto fail;
+	}
+	zram_set_flag(zram, 0, ZRAM_COMPOP_DECOMPRESS);
+	swap_header = kmap(page);
+	setup_swap_header(zram, swap_header);
+	kunmap(page);
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 	set_capacity(zram->disk, zram->disksize >> SECTOR_SHIFT);
 
 	/* zram devices sort of resembles non-rotational disks */

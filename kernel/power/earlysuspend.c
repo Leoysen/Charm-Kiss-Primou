@@ -19,6 +19,9 @@
 #include <linux/rtc.h>
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+#include <asm/atomic.h>
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 #include "power.h"
 
@@ -34,6 +37,10 @@ static int debug_mask = DEBUG_USER_STATE | DEBUG_NO_SUSPEND;
 #else
 static int debug_mask = DEBUG_USER_STATE;
 #endif
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+atomic_t optimize_comp_on = ATOMIC_INIT(0);
+EXPORT_SYMBOL(optimize_comp_on);
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 module_param_named(debug_mask, debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
 
@@ -96,6 +103,9 @@ static void early_suspend(struct work_struct *work)
 	pr_info("[R] early_suspend start\n");
 	mutex_lock(&early_suspend_lock);
 	spin_lock_irqsave(&state_lock, irqflags);
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+	atomic_set(&optimize_comp_on, 1);
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 	if (state == SUSPEND_REQUESTED) {
 		state |= SUSPENDED;
 #ifdef CONFIG_HTC_ONMODE_CHARGING
@@ -148,6 +158,9 @@ static void late_resume(struct work_struct *work)
 	pr_info("[R] late_resume start\n");
 	mutex_lock(&early_suspend_lock);
 	spin_lock_irqsave(&state_lock, irqflags);
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+	atomic_set(&optimize_comp_on, 0);
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 	if (state == SUSPENDED) {
 		state &= ~SUSPENDED;
 #ifdef CONFIG_HTC_ONMODE_CHARGING
