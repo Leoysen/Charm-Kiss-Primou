@@ -1,4 +1,4 @@
-j#undef TRACE_SYSTEM
+#undef TRACE_SYSTEM
 #define TRACE_SYSTEM writeback
 
 #if !defined(_TRACE_WRITEBACK_H) || defined(TRACE_HEADER_MULTI_READ)

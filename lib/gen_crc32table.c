@@ -23,10 +23,7 @@
 
 static uint32_t crc32table_le[LE_TABLE_ROWS][256];
 static uint32_t crc32table_be[BE_TABLE_ROWS][256];
-<<<<<<< HEAD
 static uint32_t crc32ctable_le[LE_TABLE_ROWS][256];
-=======
->>>>>>> f063d2b... crc32: add slicing by 8
 
 /**
  * crc32init_le() - allocate and initialize LE table data
@@ -49,17 +46,10 @@ static void crc32init_le_generic(const uint32_t polynomial,
 			tab[0][i + j] = crc ^ tab[0][j];
 	}
 	for (i = 0; i < LE_TABLE_SIZE; i++) {
-<<<<<<< HEAD
 		crc = tab[0][i];
 		for (j = 1; j < LE_TABLE_ROWS; j++) {
 			crc = tab[0][crc & 0xff] ^ (crc >> 8);
 			tab[j][i] = crc;
-=======
-		crc = crc32table_le[0][i];
-		for (j = 1; j < LE_TABLE_ROWS; j++) {
-			crc = crc32table_le[0][crc & 0xff] ^ (crc >> 8);
-			crc32table_le[j][i] = crc;
->>>>>>> f063d2b... crc32: add slicing by 8
 		}
 	}
 }
@@ -134,7 +124,6 @@ int main(int argc, char** argv)
 		       BE_TABLE_ROWS, BE_TABLE_SIZE);
 		output_table(crc32table_be, LE_TABLE_ROWS,
 			     BE_TABLE_SIZE, "tobe");
-<<<<<<< HEAD
 		printf("};\n");
 	}
 	if (CRC_LE_BITS > 1) {
@@ -144,8 +133,6 @@ int main(int argc, char** argv)
 		       LE_TABLE_ROWS, LE_TABLE_SIZE);
 		output_table(crc32ctable_le, LE_TABLE_ROWS,
 			     LE_TABLE_SIZE, "tole");
-=======
->>>>>>> f063d2b... crc32: add slicing by 8
 		printf("};\n");
 	}
 
