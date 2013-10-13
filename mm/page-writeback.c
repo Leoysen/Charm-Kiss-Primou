@@ -80,7 +80,7 @@ int vm_highmem_is_dirtyable;
 /*
  * The generator of dirty data starts writeback at this percentage
  */
-int vm_dirty_ratio = 90;
+int vm_dirty_ratio = 15;
 
 /*
  * vm_dirty_bytes starts at 0 (disabled) so that it is a function of
@@ -92,7 +92,7 @@ unsigned long vm_dirty_bytes;
  * The default intervals between `kupdate'-style writebacks
  */
 #define DEFAULT_DIRTY_WRITEBACK_INTERVAL	 20 * 100 /* centiseconds */
-#define HIGH_DIRTY_WRITEBACK_INTERVAL		25 * 100 /* centiseconds */
+#define HIGH_DIRTY_WRITEBACK_INTERVAL		5 * 100 /* centiseconds */
 
 /*
  * The interval between `kupdate'-style writebacks
