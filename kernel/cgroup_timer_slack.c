@@ -15,267 +15,227 @@
  * GNU General Public License for more details.
  */
 #include <linux/cgroup.h>
-#include <linux/init_task.h>
-#include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/rcupdate.h>
+#include <linux/err.h>
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
+#include <linux/earlysuspend.h>
+#endif
 
 struct cgroup_subsys timer_slack_subsys;
-struct timer_slack_cgroup {
+struct tslack_cgroup {
 	struct cgroup_subsys_state css;
 	unsigned long min_slack_ns;
-	unsigned long max_slack_ns;
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
+	unsigned long min_slack_suspend_ns;
+#endif
 };
 
-enum {
-	TIMER_SLACK_MIN,
-	TIMER_SLACK_MAX,
-};
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
+bool is_early_suspend_registered = false;
+bool is_system_active = true;
+#endif
 
-extern int (*timer_slack_check)(struct task_struct *task,
-		unsigned long slack_ns);
-
-static struct timer_slack_cgroup *cgroup_to_tslack_cgroup(struct cgroup *cgroup)
+static struct tslack_cgroup *cgroup_to_tslack(struct cgroup *cgroup)
 {
 	struct cgroup_subsys_state *css;
 
 	css = cgroup_subsys_state(cgroup, timer_slack_subsys.subsys_id);
-	return container_of(css, struct timer_slack_cgroup, css);
+	return container_of(css, struct tslack_cgroup, css);
 }
 
-static int is_timer_slack_allowed(struct timer_slack_cgroup *tslack_cgroup,
-		unsigned long slack_ns)
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
+/*
+ * Sets the status for suspended system
+ */
+static void tslack_early_suspend(struct early_suspend *handler)
 {
-	if (slack_ns < tslack_cgroup->min_slack_ns ||
-			slack_ns > tslack_cgroup->max_slack_ns)
-		return false;
-	return true;
+	is_system_active = false;
 }
 
-static int cgroup_timer_slack_check(struct task_struct *task,
-		unsigned long slack_ns)
+/*
+ * Sets the status for active system
+ */
+static void tslack_late_resume(struct early_suspend *handler)
 {
-	struct cgroup_subsys_state *css;
-	struct timer_slack_cgroup *tslack_cgroup;
-
-	/* XXX: lockdep false positive? */
-	rcu_read_lock();
-	css = task_subsys_state(task, timer_slack_subsys.subsys_id);
-	tslack_cgroup = container_of(css, struct timer_slack_cgroup, css);
-	rcu_read_unlock();
-
-	if (!is_timer_slack_allowed(tslack_cgroup, slack_ns))
-		return -EPERM;
-	return 0;
+	is_system_active = true;
 }
 
-static struct cgroup_subsys_state *
-tslack_cgroup_create(struct cgroup_subsys *subsys, struct cgroup *cgroup)
+/*
+ * Struct for the timer slack management during suspend/resume
+ */
+static struct early_suspend tslack_suspend = {
+	.suspend = tslack_early_suspend,
+	.resume = tslack_late_resume,
+};
+#endif
+
+static struct cgroup_subsys_state *tslack_create(struct cgroup *cgroup)
 {
-	struct timer_slack_cgroup *tslack_cgroup;
+	struct tslack_cgroup *tslack_cgroup;
+
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
+	/* Register the timer slack management during suspend/resume */
+	if (!is_early_suspend_registered) {
+		is_early_suspend_registered = true;
+		register_early_suspend(&tslack_suspend);
+	}
+#endif
 
 	tslack_cgroup = kmalloc(sizeof(*tslack_cgroup), GFP_KERNEL);
 	if (!tslack_cgroup)
 		return ERR_PTR(-ENOMEM);
 
 	if (cgroup->parent) {
-		struct timer_slack_cgroup *parent;
-		parent = cgroup_to_tslack_cgroup(cgroup->parent);
+		struct tslack_cgroup *parent;
+
+		parent = cgroup_to_tslack(cgroup->parent);
 		tslack_cgroup->min_slack_ns = parent->min_slack_ns;
-		tslack_cgroup->max_slack_ns = parent->max_slack_ns;
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
+		tslack_cgroup->min_slack_suspend_ns = parent->min_slack_suspend_ns;
+#endif
 	} else {
 		tslack_cgroup->min_slack_ns = 0UL;
-		tslack_cgroup->max_slack_ns = ULONG_MAX;
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
+		tslack_cgroup->min_slack_suspend_ns = 0UL;
+#endif
 	}
 
 	return &tslack_cgroup->css;
 }
 
-static void tslack_cgroup_destroy(struct cgroup_subsys *subsys,
-		struct cgroup *cgroup)
+static void tslack_destroy(struct cgroup *cgroup)
 {
-	kfree(cgroup_to_tslack_cgroup(cgroup));
+	kfree(cgroup_to_tslack(cgroup));
+}
+
+static u64 tslack_read_min(struct cgroup *cgroup, struct cftype *cft)
+{
+	return cgroup_to_tslack(cgroup)->min_slack_ns;
+}
+
+static int tslack_write_min(struct cgroup *cgroup, struct cftype *cft, u64 val)
+{
+	if (val > ULONG_MAX)
+		return -EINVAL;
+
+	cgroup_to_tslack(cgroup)->min_slack_ns = val;
+
+	return 0;
+}
+
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
+/*
+ * Gets the minimal timer slack value for suspended system
+ */
+static u64 tslack_read_min_suspend(struct cgroup *cgroup, struct cftype *cft)
+{
+	return cgroup_to_tslack(cgroup)->min_slack_suspend_ns;
 }
 
 /*
- * Adjust ->timer_slack_ns and ->default_max_slack_ns of the task to fit
- * limits of the cgroup.
+ * Sets the minimal timer slack value for suspended system
  */
-static void tslack_adjust_task(struct timer_slack_cgroup *tslack_cgroup,
-		struct task_struct *tsk)
+static int tslack_write_min_suspend(struct cgroup *cgroup, struct cftype *cft, u64 val)
 {
-	if (tslack_cgroup->min_slack_ns > tsk->timer_slack_ns)
-		tsk->timer_slack_ns = tslack_cgroup->min_slack_ns;
-	else if (tslack_cgroup->max_slack_ns < tsk->timer_slack_ns)
-		tsk->timer_slack_ns = tslack_cgroup->max_slack_ns;
-
-	if (tslack_cgroup->min_slack_ns > tsk->default_timer_slack_ns)
-		tsk->default_timer_slack_ns = tslack_cgroup->min_slack_ns;
-	else if (tslack_cgroup->max_slack_ns < tsk->default_timer_slack_ns)
-		tsk->default_timer_slack_ns = tslack_cgroup->max_slack_ns;
-}
-
-static void tslack_cgroup_attach(struct cgroup_subsys *subsys,
-		struct cgroup *cgroup, struct cgroup *prev,
-		struct task_struct *tsk, bool threadgroup)
-{
-	tslack_adjust_task(cgroup_to_tslack_cgroup(cgroup), tsk);
-}
-
-static int tslack_write_set_slack_ns(struct cgroup *cgroup, struct cftype *cft,
-		u64 val)
-{
-	struct timer_slack_cgroup *tslack_cgroup;
-	struct cgroup_iter it;
-	struct task_struct *task;
-
-	tslack_cgroup = cgroup_to_tslack_cgroup(cgroup);
-	if (!is_timer_slack_allowed(cgroup_to_tslack_cgroup(cgroup), val))
-		return -EPERM;
-
-	/* Change timer slack value for all tasks in the cgroup */
-	cgroup_iter_start(cgroup, &it);
-	while ((task = cgroup_iter_next(cgroup, &it)))
-		task->timer_slack_ns = val;
-	cgroup_iter_end(cgroup, &it);
-
-	return 0;
-}
-
-static u64 tslack_read_range(struct cgroup *cgroup, struct cftype *cft)
-{
-	struct timer_slack_cgroup *tslack_cgroup;
-
-	tslack_cgroup = cgroup_to_tslack_cgroup(cgroup);
-	switch (cft->private) {
-	case TIMER_SLACK_MIN:
-		return tslack_cgroup->min_slack_ns;
-	case TIMER_SLACK_MAX:
-		return tslack_cgroup->max_slack_ns;
-	default:
-		BUG();
-	};
-}
-
-static int validate_change(struct cgroup *cgroup, u64 val, int type)
-{
-	struct timer_slack_cgroup *tslack_cgroup, *child;
-	struct cgroup *cur;
-
-	BUG_ON(type != TIMER_SLACK_MIN || type != TIMER_SLACK_MAX);
-
-	if (cgroup->parent) {
-		struct timer_slack_cgroup *parent;
-		parent = cgroup_to_tslack_cgroup(cgroup->parent);
-		if (!is_timer_slack_allowed(parent, val))
-			return -EPERM;
-	}
-
-	tslack_cgroup = cgroup_to_tslack_cgroup(cgroup);
-	if (type == TIMER_SLACK_MIN && val > tslack_cgroup->max_slack_ns)
-		return -EINVAL;
-	else if (val < tslack_cgroup->min_slack_ns)
+	if (val > ULONG_MAX)
 		return -EINVAL;
 
-	list_for_each_entry(cur, &cgroup->children, sibling) {
-		child = cgroup_to_tslack_cgroup(cur);
-		if (type == TIMER_SLACK_MIN && val > child->min_slack_ns)
-			return -EBUSY;
-		else if (val < child->max_slack_ns)
-			return -EBUSY;
-	}
+	cgroup_to_tslack(cgroup)->min_slack_suspend_ns = val;
 
 	return 0;
 }
 
-static int tslack_write_range(struct cgroup *cgroup, struct cftype *cft,
-		u64 val)
+/*
+ * Gets the minimal timer slack value according to the system status (active/suspended)
+ */
+static unsigned long tslack_get_dynamic_min(struct cgroup *cgroup)
 {
-	struct timer_slack_cgroup *tslack_cgroup;
-	struct cgroup_iter it;
-	struct task_struct *task;
-	int err;
+	return (is_system_active) ?
+				cgroup_to_tslack(cgroup)->min_slack_ns :
+				cgroup_to_tslack(cgroup)->min_slack_suspend_ns;
+}
+#endif
 
-	err = validate_change(cgroup, val, cft->private);
-	if (err)
-		return err;
+static u64 tslack_read_effective(struct cgroup *cgroup, struct cftype *cft)
+{
+	unsigned long min;
 
-	tslack_cgroup = cgroup_to_tslack_cgroup(cgroup);
-	if (cft->private == TIMER_SLACK_MIN)
-		tslack_cgroup->min_slack_ns = val;
-	else
-		tslack_cgroup->max_slack_ns = val;
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
+	min = tslack_get_dynamic_min(cgroup);
+#else
+	min = cgroup_to_tslack(cgroup)->min_slack_ns;
+#endif
 
-	/*
-	 * Adjust timer slack value for all tasks in the cgroup to fit
-	 * min-max range.
-	 */
-	cgroup_iter_start(cgroup, &it);
-	while ((task = cgroup_iter_next(cgroup, &it)))
-		tslack_adjust_task(tslack_cgroup, task);
-	cgroup_iter_end(cgroup, &it);
+	while (cgroup->parent) {
+		cgroup = cgroup->parent;
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
+		min = max(tslack_get_dynamic_min(cgroup), min);
+#else
+		min = max(cgroup_to_tslack(cgroup)->min_slack_ns, min);
+#endif
+	}
 
-	return 0;
+	return min;
 }
 
 static struct cftype files[] = {
 	{
-		.name = "set_slack_ns",
-		.write_u64 = tslack_write_set_slack_ns,
-	},
-	{
 		.name = "min_slack_ns",
-		.private = TIMER_SLACK_MIN,
-		.read_u64 = tslack_read_range,
-		.write_u64 = tslack_write_range,
+		.read_u64 = tslack_read_min,
+		.write_u64 = tslack_write_min,
 	},
+#ifdef CONFIG_CGROUP_DYNAMIC_TIMER_SLACK
 	{
-		.name = "max_slack_ns",
-		.private = TIMER_SLACK_MAX,
-		.read_u64 = tslack_read_range,
-		.write_u64 = tslack_write_range,
+		.name = "min_slack_suspend_ns",
+		.read_u64 = tslack_read_min_suspend,
+		.write_u64 = tslack_write_min_suspend,
+	},
+#endif
+	{
+		.name = "effective_slack_ns",
+		.read_u64 = tslack_read_effective,
 	},
 };
 
-static int tslack_cgroup_populate(struct cgroup_subsys *subsys,
-		struct cgroup *cgroup)
+static int tslack_populate(struct cgroup_subsys *subsys, struct cgroup *cgroup)
 {
 	return cgroup_add_files(cgroup, subsys, files, ARRAY_SIZE(files));
 }
 
+static int tslack_allow_attach(struct cgroup *cgrp, struct cgroup_taskset *tset)
+{
+	const struct cred *cred = current_cred(), *tcred;
+	struct task_struct *task;
+
+	cgroup_taskset_for_each(task, cgrp, tset) {
+		tcred = __task_cred(task);
+
+		if ((current != task) && !capable(CAP_SYS_NICE) &&
+		    cred->euid != tcred->uid && cred->euid != tcred->suid)
+			return -EACCES;
+	}
+
+	return 0;
+}
+
 struct cgroup_subsys timer_slack_subsys = {
-	.name = "timer_slack",
-	.module = THIS_MODULE,
-#ifdef CONFIG_CGROUP_TIMER_SLACK
-	.subsys_id = timer_slack_subsys_id,
-#endif
-	.create = tslack_cgroup_create,
-	.destroy = tslack_cgroup_destroy,
-	.attach = tslack_cgroup_attach,
-	.populate = tslack_cgroup_populate,
+	.name		= "timer_slack",
+	.subsys_id	= timer_slack_subsys_id,
+	.create		= tslack_create,
+	.destroy	= tslack_destroy,
+	.populate	= tslack_populate,
+	.allow_attach	= tslack_allow_attach,
 };
 
-static int __init init_cgroup_timer_slack(void)
+unsigned long task_get_effective_timer_slack(struct task_struct *tsk)
 {
-	int err;
+	struct cgroup *cgroup;
+	unsigned long slack;
 
-	if (timer_slack_check)
-		return -EBUSY;
-	timer_slack_check = cgroup_timer_slack_check;
+	rcu_read_lock();
+	cgroup = task_cgroup(tsk, timer_slack_subsys.subsys_id);
+	slack = tslack_read_effective(cgroup, NULL);
+	rcu_read_unlock();
 
-	err = cgroup_load_subsys(&timer_slack_subsys);
-	if (err)
-		timer_slack_check = NULL;
-	return err;
+	return max(tsk->timer_slack_ns, slack);
 }
-
-static void __exit exit_cgroup_timer_slack(void)
-{
-	BUG_ON(timer_slack_check != cgroup_timer_slack_check);
-	timer_slack_check = NULL;
-	cgroup_unload_subsys(&timer_slack_subsys);
-}
-
-module_init(init_cgroup_timer_slack);
-module_exit(exit_cgroup_timer_slack);
-MODULE_LICENSE("GPL");
