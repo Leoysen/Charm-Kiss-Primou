@@ -708,30 +708,6 @@ out:
 }
 
 /*
- * If a page in tmem matches the handle, replace the page so that any
- * subsequent "get" gets the new page.  Returns 0 if
- * there was a page to replace, else returns -1.
- */
-int tmem_replace(struct tmem_pool *pool, struct tmem_oid *oidp,
-			uint32_t index, void *new_pampd)
-{
-	struct tmem_obj *obj;
-	int ret = -1;
-	struct tmem_hashbucket *hb;
-
-	hb = &pool->hashbucket[tmem_oid_hash(oidp)];
-	spin_lock(&hb->lock);
-	obj = tmem_obj_find(hb, oidp);
-	if (obj == NULL)
-		goto out;
-	new_pampd = tmem_pampd_replace_in_obj(obj, index, new_pampd);
-	ret = (*tmem_pamops.replace_in_obj)(new_pampd, obj);
-out:
-	spin_unlock(&hb->lock);
-	return ret;
-}
-
-/*
  * "Flush" all pages in tmem matching this oid.
  */
 int tmem_flush_object(struct tmem_pool *pool, struct tmem_oid *oidp)
