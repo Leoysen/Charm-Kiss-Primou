@@ -562,7 +562,7 @@ static unsigned long long uksm_sleep_times;
 
 #define UKSM_RUN_STOP	0
 #define UKSM_RUN_MERGE	1
-static unsigned int uksm_run = 1;
+static unsigned int uksm_run = 0;
 
 static DECLARE_WAIT_QUEUE_HEAD(uksm_thread_wait);
 static DEFINE_MUTEX(uksm_thread_mutex);
@@ -5557,7 +5557,7 @@ static int __init uksm_init(void)
 	struct task_struct *uksm_thread;
 	int err;
 
-	uksm_sleep_jiffies = msecs_to_jiffies(100);
+	uksm_sleep_jiffies = msecs_to_jiffies(1000);
 	uksm_sleep_saved = uksm_sleep_jiffies;
 
 	slot_tree_init();
