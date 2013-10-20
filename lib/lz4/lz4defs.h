@@ -29,6 +29,19 @@ typedef struct _U64_S { u64 v; } U64_S;
 	&& __LINUX_ARM_ARCH__ >= 6 \
 	&& defined(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS)
 
+#define A16(x) (((U16_S *)(x))->v)
+#define A32(x) (((U32_S *)(x))->v)
+#define A64(x) (((U64_S *)(x))->v)
+
+#define PUT4(s, d) (A32(d) = A32(s))
+#define PUT8(s, d) (A64(d) = A64(s))
+#define LZ4_WRITE_LITTLEENDIAN_16(p, v)        \
+	do {    \
+		A16(p) = v; \
+		p += 2; \
+	} while (0)
+#else /* CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS */
+
 #define A64(x) get_unaligned((u64 *)&(((U16_S *)(x))->v))
 #define A32(x) get_unaligned((u32 *)&(((U16_S *)(x))->v))
 #define A16(x) get_unaligned((u16 *)&(((U16_S *)(x))->v))
@@ -41,20 +54,6 @@ typedef struct _U64_S { u64 v; } U64_S;
 #define LZ4_WRITE_LITTLEENDIAN_16(p, v)        \
 	do {    \
 		put_unaligned(v, (u16 *)(p)); \
-		p += 2; \
-	} while (0)
-
-#else /* CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS */
-
-#define A16(x) (((U16_S *)(x))->v)
-#define A32(x) (((U32_S *)(x))->v)
-#define A64(x) (((U64_S *)(x))->v)
-
-#define PUT4(s, d) (A32(d) = A32(s))
-#define PUT8(s, d) (A64(d) = A64(s))
-#define LZ4_WRITE_LITTLEENDIAN_16(p, v)        \
-	do {    \
-		A16(p) = v; \
 		p += 2; \
 	} while (0)
 #endif

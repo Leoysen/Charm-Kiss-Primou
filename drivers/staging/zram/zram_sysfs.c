@@ -15,7 +15,6 @@
 #include <linux/device.h>
 #include <linux/genhd.h>
 #include <linux/mm.h>
-#include <linux/kernel.h>
 
 #include "zram_drv.h"
 
@@ -35,7 +34,7 @@ static struct zram *dev_to_zram(struct device *dev)
 	int i;
 	struct zram *zram = NULL;
 
-	for (i = 0; i < zram_get_num_devices(); i++) {
+	for (i = 0; i < num_devices; i++) {
 		zram = &zram_devices[i];
 		if (disk_to_dev(zram->disk) == dev)
 			break;
@@ -55,28 +54,20 @@ static ssize_t disksize_show(struct device *dev,
 static ssize_t disksize_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
 {
-	u64 disksize;
+	int ret;
 	struct zram *zram = dev_to_zram(dev);
 
-	disksize = memparse(buf, NULL);
-	if (!disksize)
-		return -EINVAL;
-
-	down_write(&zram->init_lock);
 	if (zram->init_done) {
-		up_write(&zram->init_lock);
 		pr_info("Cannot change disksize for initialized device\n");
 		return -EBUSY;
 	}
-#ifdef CONFIG_ZRAM_FOR_ANDROID
-        if (!disksize) {
-                disksize = default_disksize_perc_ram *
-                                        ((totalram_pages << PAGE_SHIFT) / 100);
-        }
-#endif
-	zram->disksize = PAGE_ALIGN(disksize);
+
+	ret = strict_strtoull(buf, 10, &zram->disksize);
+	if (ret)
+		return ret;
+
+	zram->disksize &= PAGE_MASK;
 	set_capacity(zram->disk, zram->disksize >> SECTOR_SHIFT);
-	up_write(&zram->init_lock);
 
 	return len;
 }
@@ -93,7 +84,7 @@ static ssize_t reset_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t len)
 {
 	int ret;
-	unsigned short do_reset;
+	unsigned long do_reset;
 	struct zram *zram;
 	struct block_device *bdev;
 
@@ -104,7 +95,7 @@ static ssize_t reset_store(struct device *dev,
 	if (bdev->bd_holders)
 		return -EBUSY;
 
-	ret = kstrtou16(buf, 10, &do_reset);
+	ret = strict_strtoul(buf, 10, &do_reset);
 	if (ret)
 		return ret;
 
@@ -115,10 +106,8 @@ static ssize_t reset_store(struct device *dev,
 	if (bdev)
 		fsync_bdev(bdev);
 
-	down_write(&zram->init_lock);
 	if (zram->init_done)
-		__zram_reset_device(zram);
-	up_write(&zram->init_lock);
+		zram_reset_device(zram);
 
 	return len;
 }
@@ -159,6 +148,15 @@ static ssize_t notify_free_show(struct device *dev,
 		zram_stat64_read(zram, &zram->stats.notify_free));
 }
 
+static ssize_t discard_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct zram *zram = dev_to_zram(dev);
+
+	return sprintf(buf, "%llu\n",
+		zram_stat64_read(zram, &zram->stats.discard));
+}
+
 static ssize_t zero_pages_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -191,8 +189,10 @@ static ssize_t mem_used_total_show(struct device *dev,
 	u64 val = 0;
 	struct zram *zram = dev_to_zram(dev);
 
-	if (zram->init_done)
-		val = zs_get_total_size_bytes(zram->mem_pool);
+	if (zram->init_done) {
+		val = zs_get_total_size_bytes(zram->mem_pool) +
+			((u64)(zram->stats.pages_expand) << PAGE_SHIFT);
+	}
 
 	return sprintf(buf, "%llu\n", val);
 }
@@ -205,6 +205,7 @@ static DEVICE_ATTR(num_reads, S_IRUGO, num_reads_show, NULL);
 static DEVICE_ATTR(num_writes, S_IRUGO, num_writes_show, NULL);
 static DEVICE_ATTR(invalid_io, S_IRUGO, invalid_io_show, NULL);
 static DEVICE_ATTR(notify_free, S_IRUGO, notify_free_show, NULL);
+static DEVICE_ATTR(discard, S_IRUGO, discard_show, NULL);
 static DEVICE_ATTR(zero_pages, S_IRUGO, zero_pages_show, NULL);
 static DEVICE_ATTR(orig_data_size, S_IRUGO, orig_data_size_show, NULL);
 static DEVICE_ATTR(compr_data_size, S_IRUGO, compr_data_size_show, NULL);
@@ -218,6 +219,7 @@ static struct attribute *zram_disk_attrs[] = {
 	&dev_attr_num_writes.attr,
 	&dev_attr_invalid_io.attr,
 	&dev_attr_notify_free.attr,
+	&dev_attr_discard.attr,
 	&dev_attr_zero_pages.attr,
 	&dev_attr_orig_data_size.attr,
 	&dev_attr_compr_data_size.attr,
@@ -228,3 +230,5 @@ static struct attribute *zram_disk_attrs[] = {
 struct attribute_group zram_disk_attr_group = {
 	.attrs = zram_disk_attrs,
 };
+
+
