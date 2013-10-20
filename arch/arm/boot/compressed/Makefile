@@ -29,7 +29,7 @@ AFLAGS_misc.o +=-Wa,-march=armv7-a$(plus_sec)
 MISC = misc.o
 
 AFLAGS_decompress.o += -Wa,-march=armv7-a$(plus_sec)
-OBJS	+= misc.o decompress.o
+DECOMPRESS = decompress.o
 ifeq ($(CONFIG_KERNEL_LZ4),y)
 CFLAGS
 endif
