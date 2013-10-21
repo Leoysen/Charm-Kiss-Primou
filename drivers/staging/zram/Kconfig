@@ -41,11 +41,14 @@ choice ZRAM_COMPRESS
 config ZRAM_LZO
 	bool "LZO compression"
 	select CRYPTO_LZO
-config ZRAM_SNAPPY
+config ZRAM_LZ4
 	bool "LZ4 compression"
 	select CRYPTO_LZ4
 	select CRYPTO_LZ4HC
 endchoice
+config ZRAM_SNAPPY
+	bool "Snappy compression"
+	select CRYPTO_SNAPPY
 
 config ZRAM_DEFAULT_DISKSIZE
 	int "Default size of zram in bytes"

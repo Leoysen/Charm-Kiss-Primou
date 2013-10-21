@@ -34,10 +34,12 @@
 #include <linux/vmalloc.h>
 
 #include "zram_drv.h"
-#if defined(CONFIG_ZRAM_SNAPPY)
+#if defined(CONFIG_ZRAM_LZ4)
 #define ZRAM_COMPRESSOR_DEFAULT "lz4"
 #elif defined(CONFIG_ZRAM_LZO)
 #define ZRAM_COMPRESSOR_DEFAULT "lzo"
+#if defined(CONFIG_ZRAM_SNAPPY)
+#define ZRAM_COMPRESSOR_DEFAULT "snappy"
 #endif
 
 /* Globals */
