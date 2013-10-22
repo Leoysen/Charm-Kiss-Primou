@@ -38,7 +38,7 @@
 #define ZRAM_COMPRESSOR_DEFAULT "lz4"
 #elif defined(CONFIG_ZRAM_LZO)
 #define ZRAM_COMPRESSOR_DEFAULT "lzo"
-#if defined(CONFIG_ZRAM_SNAPPY)
+#elif defined(CONFIG_ZRAM_SNAPPY)
 #define ZRAM_COMPRESSOR_DEFAULT "snappy"
 #endif
 
