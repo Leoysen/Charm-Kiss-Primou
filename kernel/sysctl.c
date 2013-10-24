@@ -1411,6 +1411,16 @@ static struct ctl_table binfmt_misc_table[] = {
 	{ }
 };
 #endif
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "min_filelist_kbytes",
+		.data		= &min_filelist_kbytes,
+		.maxlen		= sizeof(min_filelist_kbytes),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+		.strategy	= &sysctl_intvec,
+		.extra1		= &zero,
+	},
 
 static struct ctl_table fs_table[] = {
 	{
