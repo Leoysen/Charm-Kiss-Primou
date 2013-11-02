@@ -6,6 +6,7 @@ make charm-kiss_defconfig
 make -j84
 echo "Copy Modules to Sense Ramdisk"
 find -name '*.ko' -exec cp -av {} ../bootimg_tools_Charm/ramdisk_advanced/lib/modules \;
+mv arch/arm/boot/zImage ../bootimg_tools_Charm/
 cd ../bootimg_tools_Charm/ramdisk_advanced
 rm -f ../*.cpio.gz
 find . | cpio -o -H newc | gzip > ../initramfs-Advanced-OC.cpio.gz
@@ -20,5 +21,4 @@ sleep 5
 #############################################################################################################################
 
 echo "Done"
-read ANS
-return 0
+exit

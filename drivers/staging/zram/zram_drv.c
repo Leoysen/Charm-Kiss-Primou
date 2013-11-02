@@ -70,6 +70,25 @@ snappy_decompress_(
 	snappy_compress_(s, sl, d, dl, wm)
 #define DECOMPRESS(s, sl, d, dl)	\
 	snappy_decompress_(s, sl, d, dl)
+#elif defined(CONFIG_ZRAM_LZ4)
+#include "../lz4/lz4.h"
+#define WMSIZE    LZ4_MEM_COMPRESS
+static int lz4_decompress_(
+        const unsigned char *src,
+        size_t src_len,
+        unsigned char *dst,
+        size_t *dst_len
+        )
+{
+  uint32_t dst_len_ = (uint32_t)*dst_len;
+  int ret = lz4_decompress_unknownoutputsize(src, src_len, dst, &dst_len_);
+  *dst_len = (size_t)dst_len_;
+  return ret;
+}
+#define COMPRESS(s, sl, d, dl, wm)  \
+  lz4_compress(s, sl, d, dl, wm)
+#define DECOMPRESS(s, sl, d, dl)  \
+  lz4_decompress_(s, sl, d, dl)
 #else
 #error either CONFIG_ZRAM_LZO or CONFIG_ZRAM_SNAPPY must be defined
 #endif
